@@ -1,0 +1,16 @@
+class Reward:
+    BUY_ASSET = 1
+    BUILD_HOUSE = 3
+    BUILD_HOTEL = 5
+    SELL_HOUSE = -3
+    SELL_HOTEL = -5
+    BANKRUPTCY = -500
+    WIN_GAME = 10_000
+    MORTGAGE_ASSET = -1
+    UNMORTGAGE_ASSET = 1
+    FULL_SET = 5
+    PAY_TO_LEAVE = 0.2
+    STAY = -0.1
+    INVALID_ACTION = -1
+    NO_REWARD = 0
+    TIMEOUT = -2
