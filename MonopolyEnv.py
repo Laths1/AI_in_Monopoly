@@ -28,6 +28,7 @@ from actions import *
 from turn_timer import Timer90
 from log_messages import *
 
+# Toggles to see actions printed
 verbose = False
 
 def log(message):
@@ -441,7 +442,7 @@ class MonopolyEnv(gym.Env):
             shape=(self.observation_length,), 
             dtype=np.float32
         )
-        self.action_space = spaces.Discrete(16)
+        self.action_space = spaces.Discrete(11)
 
         # Bookkeeping
         self._prev_net_worth = None
@@ -454,71 +455,82 @@ class MonopolyEnv(gym.Env):
     # Action mask generation
     # -----------------------
     def _get_action_mask(self, player: Player) -> np.ndarray:
-        """Updated action mask - remove trade accept/decline."""
-        mask = np.zeros(16, dtype=np.float32)
+        """
+        Generate 11-action mask (removed ACCEPT_TRADE, DECLINE_TRADE, BID_10, BID_50, BID_100)
+        
+        New action mapping:
+        0: BUY_ASSET
+        1: TRADE (auto-resolves)
+        2: AUCTION (auto-resolves)
+        3: BUILD_HOUSE
+        4: BUILD_HOTEL
+        5: SELL_HOUSE
+        6: SELL_HOTEL
+        7: MORTGAGE_ASSET
+        8: UNMORTGAGE_ASSET
+        9: PAY_TO_LEAVE_JAIL
+        10: STAY_IN_JAIL
+        """
+        mask = np.zeros(11, dtype=np.float32)  # Changed from 16 to 11
         tile = self.board.board[player.position]
 
         # BUY_ASSET (0)
         if tile.type in ["Property", "Railway", "Utility"] and tile.obj:
             if not tile.obj.is_sold() and player.capital >= tile.obj.market_price:
-                mask[Action.BUY_ASSET] = 1.0
+                mask[0] = 1.0  # Changed from Action.BUY_ASSET to index 0
 
-        # TRADE (1) - simplified, auto-resolves
+        # TRADE (1)
         if len(player.show_assets()) > 0 and len(self.players) > 1:
-            mask[Action.TRADE] = 1.0
+            mask[1] = 1.0
 
-        # REMOVE THESE - trades auto-resolve now
-        # mask[Action.ACCEPT_TRADE] = 0.0  # Always disabled
-        # mask[Action.DECLINE_TRADE] = 0.0  # Always disabled
-
-        # AUCTION (4) - simplified, auto-resolves
+        # AUCTION (2)
         if tile.type in ["Property", "Railway", "Utility"] and tile.obj:
             if not tile.obj.is_sold():
-                mask[Action.AUCTION] = 1.0
+                mask[2] = 1.0
 
-        # BUILD_HOUSE (8)
+        # BUILD_HOUSE (3)
         can_build_house = False
         for a in player.show_assets():
             if isinstance(a, Property) and a.has_full_set and not a.is_mortgaged and a.houses < 4 and not a.hotel:
                 if player.capital >= a.house_price:
                     can_build_house = True
                     break
-        mask[Action.BUILD_HOUSE] = 1.0 if can_build_house else 0.0
+        mask[3] = 1.0 if can_build_house else 0.0
 
-        # BUILD_HOTEL (9)
+        # BUILD_HOTEL (4)
         can_build_hotel = False
         for a in player.show_assets():
             if isinstance(a, Property) and a.has_full_set and not a.is_mortgaged and a.houses == 4 and not a.hotel:
                 if player.capital >= a.hotel_price:
                     can_build_hotel = True
                     break
-        mask[Action.BUILD_HOTEL] = 1.0 if can_build_hotel else 0.0
+        mask[4] = 1.0 if can_build_hotel else 0.0
 
-        # SELL_HOUSE (10)
+        # SELL_HOUSE (5)
         can_sell_house = False
         for a in player.show_assets():
             if isinstance(a, Property) and a.houses > 0:
                 can_sell_house = True
                 break
-        mask[Action.SELL_HOUSE] = 1.0 if can_sell_house else 0.0
+        mask[5] = 1.0 if can_sell_house else 0.0
 
-        # SELL_HOTEL (11)
+        # SELL_HOTEL (6)
         can_sell_hotel = False
         for a in player.show_assets():
             if isinstance(a, Property) and a.hotel:
                 can_sell_hotel = True
                 break
-        mask[Action.SELL_HOTEL] = 1.0 if can_sell_hotel else 0.0
+        mask[6] = 1.0 if can_sell_hotel else 0.0
 
-        # MORTGAGE_ASSET (12)
+        # MORTGAGE_ASSET (7)
         can_mortgage = False
         for a in player.show_assets():
             if not getattr(a, "is_mortgaged", False):
                 can_mortgage = True
                 break
-        mask[Action.MORTGAGE_ASSET] = 1.0 if can_mortgage else 0.0
+        mask[7] = 1.0 if can_mortgage else 0.0
 
-        # UNMORTGAGE_ASSET (13)
+        # UNMORTGAGE_ASSET (8)
         can_unmortgage = False
         for a in player.show_assets():
             if getattr(a, "is_mortgaged", False):
@@ -526,15 +538,15 @@ class MonopolyEnv(gym.Env):
                 if player.capital >= unmortgage_cost:
                     can_unmortgage = True
                     break
-        mask[Action.UNMORTGAGE_ASSET] = 1.0 if can_unmortgage else 0.0
+        mask[8] = 1.0 if can_unmortgage else 0.0
 
-        # PAY_TO_LEAVE_JAIL (14)
+        # PAY_TO_LEAVE_JAIL (9)
         if player.in_jail and player.capital >= 50:
-            mask[Action.PAY_TO_LEAVE_JAIL] = 1.0
+            mask[9] = 1.0
 
-        # STAY_IN_JAIL (15)
+        # STAY_IN_JAIL (10)
         if player.in_jail:
-            mask[Action.STAY_IN_JAIL] = 1.0
+            mask[10] = 1.0
 
         return mask
 
@@ -698,9 +710,9 @@ class MonopolyEnv(gym.Env):
             info["reason"] = "bankruptcy"
 
         # Net worth shaping
-        self._prev_net_worth = net_worth
         net_worth = agent.capital + getattr(agent, "net_asset_value", 0)
-       
+        self._prev_net_worth = net_worth
+
         # Win condition
         if len(self.players) == 1:
             done = True
@@ -737,10 +749,10 @@ class MonopolyEnv(gym.Env):
     # Action execution
     # -----------------------
     def _execute_action(self, agent: Player, action: int) -> float:
-        """Simplified action execution."""
+        """Execute action using new 11-action mapping."""
         reward = 0.0
 
-        if action == Action.BUY_ASSET:
+        if action == 0:  # BUY_ASSET
             tile = self.board.board[agent.position]
             if tile.type in ["Property", "Railway", "Utility"] and tile.obj and not tile.obj.is_sold():
                 price = tile.obj.market_price
@@ -750,18 +762,16 @@ class MonopolyEnv(gym.Env):
                     self.bank.buy(price)
                     reward = Reward.BUY_ASSET
 
-        elif action == Action.TRADE:
-            # AUTO-RESOLVE trade
+        elif action == 1:  # TRADE
             reward = self._initiate_trade(agent)
 
-        elif action == Action.AUCTION:
-            # AUTO-RESOLVE auction
+        elif action == 2:  # AUCTION
             tile = self.board.board[agent.position]
             if tile.type in ["Property", "Railway", "Utility"] and tile.obj and not tile.obj.is_sold():
                 self._start_auction(tile.obj)
                 reward = 0.0
 
-        elif action == Action.BUILD_HOUSE:
+        elif action == 3:  # BUILD_HOUSE
             for a in list(agent.assets):
                 if isinstance(a, Property) and a.has_full_set and not a.is_mortgaged and a.houses < 4 and not a.hotel:
                     cost = a.house_price
@@ -772,7 +782,7 @@ class MonopolyEnv(gym.Env):
                         reward = Reward.BUILD_HOUSE
                         break
 
-        elif action == Action.BUILD_HOTEL:
+        elif action == 4:  # BUILD_HOTEL
             for a in list(agent.assets):
                 if isinstance(a, Property) and a.has_full_set and not a.is_mortgaged and a.houses == 4 and not a.hotel:
                     cost = a.hotel_price
@@ -783,27 +793,27 @@ class MonopolyEnv(gym.Env):
                         reward = Reward.BUILD_HOTEL
                         break
 
-        elif action == Action.SELL_HOUSE:
+        elif action == 5:  # SELL_HOUSE
             for a in list(agent.assets):
                 if isinstance(a, Property) and a.houses > 0:
-                    price = a.house_price // 2  # Sell at half price
+                    price = a.house_price // 2
                     a.sell_house(agent)
                     agent.sell(price)
                     self.bank.sell(price)
                     reward = Reward.SELL_HOUSE
                     break
 
-        elif action == Action.SELL_HOTEL:
+        elif action == 6:  # SELL_HOTEL
             for a in list(agent.assets):
                 if isinstance(a, Property) and a.hotel:
-                    price = a.hotel_price // 2  # Sell at half price
+                    price = a.hotel_price // 2
                     a.sell_hotel(agent)
                     agent.sell(price)
                     self.bank.sell(price)
                     reward = Reward.SELL_HOTEL
                     break
 
-        elif action == Action.MORTGAGE_ASSET:
+        elif action == 7:  # MORTGAGE_ASSET
             for a in list(agent.assets):
                 if not getattr(a, "is_mortgaged", False):
                     val = a.mortgage_property(agent)
@@ -813,7 +823,7 @@ class MonopolyEnv(gym.Env):
                         reward = Reward.MORTGAGE_ASSET
                         break
 
-        elif action == Action.UNMORTGAGE_ASSET:
+        elif action == 8:  # UNMORTGAGE_ASSET
             for a in list(agent.assets):
                 if getattr(a, "is_mortgaged", False):
                     unmortgage_cost = getattr(a, "mortgage_value", 0) * 1.1
@@ -825,7 +835,7 @@ class MonopolyEnv(gym.Env):
                             reward = Reward.UNMORTGAGE_ASSET
                             break
 
-        elif action == Action.PAY_TO_LEAVE_JAIL:
+        elif action == 9:  # PAY_TO_LEAVE_JAIL
             if agent.in_jail and agent.capital >= 50:
                 agent.pay(50)
                 agent.in_jail = False
@@ -833,7 +843,7 @@ class MonopolyEnv(gym.Env):
                 self.bank.buy(50)
                 reward = Reward.PAY_TO_LEAVE
 
-        elif action == Action.STAY_IN_JAIL:
+        elif action == 10:  # STAY_IN_JAIL
             if agent.in_jail:
                 agent.jail_counter += 1
                 if agent.jail_counter >= 3:
@@ -842,6 +852,7 @@ class MonopolyEnv(gym.Env):
                 reward = Reward.STAY
 
         return reward
+
 
     # -----------------------
     # Auction helpers
@@ -855,7 +866,7 @@ class MonopolyEnv(gym.Env):
         winner = auction.start_auction(self.bank)
         
         if winner:
-            log(MESSAGES.AUCTION_WON.format(player_name=winner.player_name, property_name=property_obj.property_name, final_bid=property_obj.market_price))
+            log(MESSAGES.WINS_AUCTION.format(player_name=winner.player_name, property_name=property_obj.property_name, final_bid=property_obj.market_price))
     
         # No persistent auction state
         self.active_auction = None
@@ -896,7 +907,7 @@ class MonopolyEnv(gym.Env):
             try:
                 result = self.trading.open_trade(proposer, receiver, asset1, asset2, pay_amount, ask_amount)
                 if "successful" in result:
-                    log(MESSAGES.TRADE_COMPLETED.format(proposer_name=proposer.player_name, receiver_name=receiver.player_name))
+                    log(MESSAGES.TRADE_SUCCESSFUL.format(proposer_name=proposer.player_name, receiver_name=receiver.player_name))
                     return 2.0  # Reward for successful trade
             except Exception as e:
                 log(MESSAGES.TRADE_FAILED.format(error_msg=str(e)))

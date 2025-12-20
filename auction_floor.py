@@ -2,7 +2,8 @@ class Auction:
     """
     Handles property auctions in the Monopoly game.
 
-    Auctions occur when a player declines to buy an unowned property.
+    Auctions occur when a player declines to buy an unowned property or 
+    cannot afford the property,
     All players have a chance to bid. Players may drop out at any time.
 
     The auction ends when:
@@ -51,7 +52,7 @@ class Auction:
         - A player returns `None` to withdraw from the auction.
         - Highest bid wins once only one bidder is left.
         """
-        print(f"Auction started for {self.property.property_name}")
+        # print(f"Auction started for {self.property.property_name}")
 
         highest_bid = 0
         highest_bidder = None
@@ -66,7 +67,7 @@ class Auction:
 
                 # Player leaves auction
                 if bid is None:
-                    print(f"{player.player_name} pulled out.")
+                    # print(f"{player.player_name} pulled out.")
                     withdrawing_players.append(player)
                     continue
 
@@ -89,12 +90,12 @@ class Auction:
             highest_bidder.buy(self.property, highest_bid)
             bank.buy(highest_bid)
 
-            print(
-                f"{highest_bidder.player_name} won the auction for "
-                f"{self.property.property_name} with a bid of {highest_bid}"
-            )
+            # print(
+            #     f"{highest_bidder.player_name} won the auction for "
+            #     f"{self.property.property_name} with a bid of {highest_bid}"
+            # )
 
             return highest_bidder
 
-        print("No bids were made in the auction.")
+        # print("No bids were made in the auction.")
         return None

@@ -1,7 +1,7 @@
 class Action:
     BUY_ASSET = 0
-    TRADE = 1              # Auto-resolves
-    AUCTION = 2            # Auto-resolves
+    TRADE = 1              
+    AUCTION = 2            
     BUILD_HOUSE = 3
     BUILD_HOTEL = 4
     SELL_HOUSE = 5

@@ -38,7 +38,7 @@ class MESSAGES:
     AUCTION_STARTED = "Auction started for {property_name}"
     
     # Trade messages
-    TRADE_SUCCESSFUL = "Trade successful: {player1} ↔ {player2}"
+    TRADE_SUCCESSFUL = "Trade successful: {proposer_name} ↔ {receiver_name}"
     TRADE_FAILED = "Trade failed: {error}"
     TRADE_PROPOSED = "{proposer} proposes trade to {receiver}"
     

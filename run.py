@@ -31,7 +31,7 @@ from MonopolyEnv import *
 class Config:
     # Training parameters
     TOTAL_TIMESTEPS = 1_000_000  # Total training steps
-    NUM_ENVS = 4                  # Parallel environments
+    NUM_ENVS = 1                  # Parallel environments
     SAVE_FREQ = 50_000           # Save model every N steps
     EVAL_FREQ = 25_000           # Evaluate every N steps
     EVAL_EPISODES = 10           # Episodes per evaluation
