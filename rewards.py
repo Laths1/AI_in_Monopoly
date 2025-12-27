@@ -4,7 +4,7 @@ class Reward:
     BUILD_HOTEL = 5
     SELL_HOUSE = -3
     SELL_HOTEL = -5
-    BANKRUPTCY = -500
+    BANKRUPTCY = -5000
     WIN_GAME = 10_000
     MORTGAGE_ASSET = -1
     UNMORTGAGE_ASSET = 1

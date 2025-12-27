@@ -27,6 +27,8 @@ from rewards import *
 from actions import *
 from turn_timer import Timer90
 from log_messages import *
+import pandas as pd
+from monopoly_to_csv import MonopolyCSVLogger
 
 # Toggles to see actions printed
 verbose = False
@@ -450,6 +452,7 @@ class MonopolyEnv(gym.Env):
             "dice_roll": 0, "old_position": 0, "new_position": 0, "capital": 1500
         }
 
+        self.logger = MonopolyCSVLogger(env_id=agent_index)
 
     # -----------------------
     # Action mask generation
@@ -574,6 +577,7 @@ class MonopolyEnv(gym.Env):
             random.seed(seed)
             np.random.seed(seed)
 
+        self.logger.start_episode()
         self.turn_count = 0
         self.board = Board()
         self.bank = Bank(salary=200)
@@ -619,10 +623,13 @@ class MonopolyEnv(gym.Env):
             raise ValueError(f"Invalid action: {action}")
 
         self.turn_count += 1
-        
-        # Start timer for agent's turn
+        self.logger.step()
+
+        # -------------------------
+        # Timer handling
+        # -------------------------
         if self.use_timer and self.current_player_index == self.agent_index:
-            if self.timer:
+            if hasattr(self, "timer") and self.timer:
                 try:
                     self.timer.stop()
                 except Exception:
@@ -634,14 +641,17 @@ class MonopolyEnv(gym.Env):
                 pass
             self.timer_expired = False
 
-        # Fast-forward heuristic players until agent's turn
+        # -------------------------
+        # Fast-forward heuristic players
+        # -------------------------
         while self.current_player_index != self.agent_index:
             current = self.players[self.current_player_index]
             self._run_heuristic_turn(current)
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
-            
+
+            # Agent eliminated during heuristic turns
             if self.agent_index >= len(self.players):
-                if self.timer:
+                if hasattr(self, "timer") and self.timer:
                     try:
                         self.timer.stop()
                     except Exception:
@@ -649,100 +659,143 @@ class MonopolyEnv(gym.Env):
                 obs = self._get_observation()
                 return obs, float(Reward.BANKRUPTCY), True, False, {"reason": "agent_removed"}
 
+        # -------------------------
         # Agent's turn
+        # -------------------------
         agent = self.players[self.agent_index]
         reward = 0.0
         done = False
         info: Dict[str, Any] = {}
-        
-        # Check if timer expired (only applicable if timer is enabled)
-        if self.use_timer and self.timer and getattr(self.timer, "time_left", 1) <= 0:
-            self.timer_expired = True
-            reward += Reward.TIMEOUT  # Penalty for timing out
-            info["timer_expired"] = True
-            log(MESSAGES.TIMER_EXPIRED.format(player_name=agent.player_name))
 
-        # ---- Movement Phase ----
+        # -------------------------
+        # Timer expiration
+        # -------------------------
+        if self.use_timer and hasattr(self, "timer") and self.timer and getattr(self.timer, "time_left", 1) <= 0:
+            self.timer_expired = True
+            reward += Reward.TIMEOUT
+            info["timer_expired"] = True
+
+        # -------------------------
+        # Movement phase
+        # -------------------------
         dice = roll_dice()
         old_pos = agent.position
         new_pos = (old_pos + dice) % 40
         agent.position = new_pos
 
         self._last_turn_info = {
-            "dice_roll": dice, "old_position": old_pos, "new_position": new_pos, "capital": agent.capital
+            "dice_roll": dice,
+            "old_position": old_pos,
+            "new_position": new_pos,
+            "capital": agent.capital,
         }
 
         # Passing GO
         if old_pos + dice >= 40:
             salary = self.bank.go_salary()
             agent.receive(salary)
-        
-        # Tile interaction (rent, taxes, cards)
+
+        # Tile interaction
         tile = self.board.board[new_pos]
         tile_interaction(agent, tile, self.bank, self.board, self.players, dice, self.chance, self.community)
 
-        # Check full sets after movement
-        full_sets = check_set_ownership(agent)
-        if full_sets:
+        # Full-set reward
+        if check_set_ownership(agent):
             reward += Reward.FULL_SET
 
-        # ---- Action Phase ----
-        # If timer expired, force a default action (do nothing / pass turn)
+        # -------------------------
+        # Action phase
+        # -------------------------
         if self.timer_expired:
-            action = Action.STAY_IN_JAIL if agent.in_jail else -1  # No-op
-        
-        action_mask = self._get_action_mask(agent)
-        
-        # Penalize invalid actions
-        if action >= 0 and action_mask[action] == 0.0:
-            reward += Reward.INVALID_ACTION 
-        elif action >= 0:
-            # Execute valid action
-            action_reward = self._execute_action(agent, action)
-            reward += action_reward
+            action = -1  # forced no-op
 
-        # ---- Post-action checks ----
+        action_mask = self._get_action_mask(agent)
+        invalid_action = action >= 0 and action_mask[action] == 0
+
+        if invalid_action:
+            reward += Reward.INVALID_ACTION
+        elif action >= 0:
+            reward += self._execute_action(agent, action)
+
+        # -------------------------
         # Solvency check
+        # -------------------------
         bankruptcy_penalty = check_player_solvency(agent, self.bank, self.players)
         if bankruptcy_penalty:
             reward += bankruptcy_penalty
             done = True
             info["reason"] = "bankruptcy"
 
-        # Net worth shaping
+        # -------------------------
+        # Net worth
+        # -------------------------
         net_worth = agent.capital + getattr(agent, "net_asset_value", 0)
         self._prev_net_worth = net_worth
 
+        if not self.bank.bank_solvency:
+            done = True
+            info["reason"] = "bank_insolvent"
+
+        # -------------------------
         # Win condition
+        # -------------------------
         if len(self.players) == 1:
             done = True
             if self.players[0] == agent:
                 reward += Reward.WIN_GAME
                 info["reason"] = "victory"
 
-        # Max turns truncation
+        # -------------------------
+        # Max turn truncation
+        # -------------------------
         if self.turn_count >= self.max_turns:
             done = True
             info["reason"] = "max_turns"
-        
-        # Stop timer when turn ends
-        if self.use_timer and self.timer:
+
+        # -------------------------
+        # Stop timer
+        # -------------------------
+        if self.use_timer and hasattr(self, "timer") and self.timer:
             try:
                 self.timer.stop()
             except Exception:
                 pass
 
+        # -------------------------
         # Advance turn
+        # -------------------------
         if len(self.players) > 0:
             self.current_player_index = (self.current_player_index + 1) % len(self.players)
 
+        # -------------------------
+        # LOGGING (CRITICAL)
+        # -------------------------
+        winner_index = None
+        if done and len(self.players) == 1:
+            winner_index = self.players.index(self.players[0])
+
+        self.logger.log_step(
+            players=self.players,
+            agent_index=self.agent_index,
+            action=action,
+            reward=reward,
+            action_mask=action_mask,
+            invalid_action=invalid_action,
+            done=done,
+            winner_index=winner_index,
+        )
+
+        # -------------------------
+        # Return
+        # -------------------------
         obs = self._get_observation()
         info["net_worth"] = net_worth
         info["turn"] = self.turn_count
-        if self.use_timer and self.timer:
+        if self.use_timer and hasattr(self, "timer") and self.timer:
             info["time_left"] = getattr(self.timer, "time_left", None)
-        
+
         return obs, float(reward), done, False, info
+
 
 
     # -----------------------
@@ -879,12 +932,12 @@ class MonopolyEnv(gym.Env):
         
         other_players = [p for p in self.players if p != proposer]
         if not other_players:
-            return 0.0
+            return Reward.NO_REWARD
 
         receiver = random.choice(other_players)
         proposer_assets = proposer.show_assets()
         if not proposer_assets:
-            return 0.0
+            return Reward.NO_REWARD
             
         asset1 = random.choice(proposer_assets)
         receiver_assets = receiver.show_assets()
@@ -908,13 +961,13 @@ class MonopolyEnv(gym.Env):
                 result = self.trading.open_trade(proposer, receiver, asset1, asset2, pay_amount, ask_amount)
                 if "successful" in result:
                     log(MESSAGES.TRADE_SUCCESSFUL.format(proposer_name=proposer.player_name, receiver_name=receiver.player_name))
-                    return 2.0  # Reward for successful trade
+                    return Reward.NO_REWARD  # Reward for successful trade
             except Exception as e:
                 log(MESSAGES.TRADE_FAILED.format(error_msg=str(e)))
-                return -1.0
+                return Reward.NO_REWARD
         
         # Trade rejected
-        return -0.5
+        return Reward.NO_REWARD
 
     # -----------------------
     # Heuristic player logic

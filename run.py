@@ -12,6 +12,7 @@ Features:
 """
 import warnings
 warnings.filterwarnings("ignore", message="sys.meta_path is None")
+import argparse
 import os
 import numpy as np
 import torch
@@ -30,15 +31,15 @@ from MonopolyEnv import *
 # ===============================
 class Config:
     # Training parameters
-    TOTAL_TIMESTEPS = 1_000_000  # Total training steps
-    NUM_ENVS = 1                  # Parallel environments
+    TOTAL_TIMESTEPS = 1_000  # Total training steps
+    NUM_ENVS = 4                  # Parallel environments
     SAVE_FREQ = 50_000           # Save model every N steps
     EVAL_FREQ = 25_000           # Evaluate every N steps
     EVAL_EPISODES = 10           # Episodes per evaluation
     
     # Environment parameters
-    NUM_PLAYERS = 4              # Players per game (2-6)
-    MAX_TURNS = 500              # Max turns per episode
+    NUM_PLAYERS = 2              # Players per game (2-6)
+    MAX_TURNS = 100              # Max turns per episode
     USE_TIMER = False            # Enable 90-second timer (disable for training)
     
     # PPO hyperparameters
@@ -54,7 +55,7 @@ class Config:
     MAX_GRAD_NORM = 0.5          # Gradient clipping
     
     # Network architecture
-    NET_ARCH = [256, 256]        # Hidden layer sizes
+    NET_ARCH = [128, 128]        # Hidden layer sizes
     
     # Directories
     LOG_DIR = "./logs"
@@ -371,8 +372,7 @@ def evaluate(model_path, n_episodes=10, render=True):
 # Main Entry Point
 # ===============================
 if __name__ == "__main__":
-    import argparse
-    
+        
     parser = argparse.ArgumentParser(description="Train or evaluate Monopoly RL agent")
     parser.add_argument("--mode", type=str, default="train", choices=["train", "eval"],
                       help="Mode: train or eval")
